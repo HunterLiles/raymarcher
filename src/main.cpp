@@ -9,14 +9,7 @@ int main(int argc, char **argv) {
     GLFWwindow *window = nullptr;
     Vulkan *renderer = nullptr;
     bool glfw_ready = false;
-    // main coordinates lifetimes; resource allocation and engine logic stay in their modules.
     auto cleanup = [&] {
-        if (renderer) {
-            try {
-                vulkan_wait_idle(*renderer);
-            } catch (...) {
-            }
-        }
         vulkan_destroy(renderer);
         if (window)
             glfwDestroyWindow(window);
@@ -48,7 +41,7 @@ int main(int argc, char **argv) {
         if (!glfwVulkanSupported())
             throw std::runtime_error("GLFW cannot find Vulkan support");
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        window = glfwCreateWindow(1280, 720, "Vulkan starter", nullptr, nullptr);
+        window = glfwCreateWindow(1280, 720, "Raymarcher", nullptr, nullptr);
         if (!window)
             throw std::runtime_error("Window creation failed");
         uint32_t extension_count = 0;
@@ -71,27 +64,18 @@ int main(int argc, char **argv) {
             auto now = Clock::now();
             double frame_ms = std::chrono::duration<double, std::milli>(now - previous).count();
             previous = now;
-            auto poll_start = Clock::now();
             glfwPollEvents();
-            double poll_ms =
-                std::chrono::duration<double, std::milli>(Clock::now() - poll_start).count();
+            if (glfwWindowShouldClose(window) || glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+                break;
             glfwGetFramebufferSize(window, &width, &height);
             if (width == 0 || height == 0) {
                 glfwWaitEvents();
                 previous = Clock::now();
                 continue;
             }
-            if (!vulkan_begin(*renderer, uint32_t(width), uint32_t(height)))
-                continue;
-            auto cpu_start = Clock::now();
-            float dt = float(std::min(frame_ms * .001, .05));
             elapsed_seconds += float(frame_ms * .001);
-            auto dimensions = vulkan_stats(*renderer);
-            RenderData data =
-                camera_render_data(dimensions.width, dimensions.height, elapsed_seconds);
-            double cpu_ms =
-                poll_ms +
-                std::chrono::duration<double, std::milli>(Clock::now() - cpu_start).count();
+            if (!vulkan_draw(*renderer, uint32_t(width), uint32_t(height), elapsed_seconds))
+                continue;
             ++rendered;
             if (resize_test && rendered == 30)
                 glfwSetWindowSize(window, 960, 640);

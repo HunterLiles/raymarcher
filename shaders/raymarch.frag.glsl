@@ -1,11 +1,15 @@
 #version 460
+#extension GL_GOOGLE_include_directive : require
 
-#include "lighting.glsl"
-#include "sdf.glsl"
+layout(push_constant) uniform Frame {
+    vec2 resolution;
+    float time;
+} frame;
 
 layout(location = 0) out vec4 out_color;
 
-in vec2 fragCoord;
+#include "sdf.glsl"
+#include "lighting.glsl"
 
 vec3 ray_march(in vec3 ray_origin, in vec3 ray_dir) {
     float total_dist = 0.0f;
@@ -33,15 +37,15 @@ vec3 ray_march(in vec3 ray_origin, in vec3 ray_dir) {
 }
 
 void main() {
-    // Normalized pixel coordinates (from 0 to 1)
-    vec2 uv = fragCoord / iResolution.xy * 2.0f - 1.0f;
+    // Center the pixels, preserve aspect ratio, and point +Y upward.
+    vec2 uv = (2.0 * gl_FragCoord.xy - frame.resolution) / frame.resolution.y;
+    uv.y = -uv.y;
 
-    vec3 camera_p = vec3(0.0f, 0.0f, -5.0f);
-    vec3 ray_origin = camera_p;
-    vec3 ray_dir = vec3(uv, 1.0f);
+    vec3 ray_origin = vec3(0.0, 0.0, -5.0);
+    vec3 ray_dir = normalize(vec3(uv, 1.0));
 
     vec3 image = ray_march(ray_origin, ray_dir);
 
     // Output to screen
-    fragColor = vec4(image, 1.0);
+    out_color = vec4(image, 1.0);
 }

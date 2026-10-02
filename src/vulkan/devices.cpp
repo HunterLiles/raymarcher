@@ -68,16 +68,9 @@ void device_create(Device &d, VkInstance instance, VkSurfaceKHR surface) {
     ci.ppEnabledExtensionNames = &extension;
     VK_CHECK(vkCreateDevice(d.physical, &ci, nullptr, &d.handle));
     queues_load(d.handle, d.queues);
-    vkGetPhysicalDeviceMemoryProperties(d.physical, &d.memory);
 }
 void device_destroy(Device &d) {
     if (d.handle)
         vkDestroyDevice(d.handle, nullptr);
     d = {};
-}
-uint32_t memory_type(const Device &d, uint32_t mask, VkMemoryPropertyFlags flags) {
-    for (uint32_t i = 0; i < d.memory.memoryTypeCount; ++i)
-        if ((mask & (1u << i)) && (d.memory.memoryTypes[i].propertyFlags & flags) == flags)
-            return i;
-    throw std::runtime_error("No compatible Vulkan memory type");
 }

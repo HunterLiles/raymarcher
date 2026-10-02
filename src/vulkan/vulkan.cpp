@@ -24,9 +24,9 @@ struct Vulkan {
     Swapchain swapchain;
     Pipeline pipeline;
     std::array<Frame, 2> frames{};
-    uint32_t slot{}, image{}, generation{};
+    uint32_t slot{}, image{};
     uint32_t requested_width{}, requested_height{};
-    bool recreate{}, frame_open{};
+    bool recreate{};
     std::filesystem::path shaders;
     FrameStats stats;
 };
@@ -53,10 +53,6 @@ static void rebuild(Vulkan &v, uint32_t w, uint32_t h) {
     v.requested_width = w;
     v.requested_height = h;
     v.recreate = false;
-    ++v.generation;
-    v.stats.width = v.swapchain.extent.width;
-    v.stats.height = v.swapchain.extent.height;
-    v.stats.swapchain_images = uint32_t(v.swapchain.images.size());
 }
 void vulkan_initialize(Vulkan &v, VkSurfaceKHR surface, uint32_t w, uint32_t h,
                        const std::filesystem::path &shaders) {
@@ -70,11 +66,6 @@ void vulkan_initialize(Vulkan &v, VkSurfaceKHR surface, uint32_t w, uint32_t h,
     }
     rebuild(v, w, h);
     v.stats.device_name = v.device.properties.deviceName;
-    v.stats.validation = v.instance.validation;
-}
-void vulkan_wait_idle(Vulkan &v) {
-    if (v.device.handle)
-        VK_CHECK(vkDeviceWaitIdle(v.device.handle));
 }
 void vulkan_destroy(Vulkan *v) {
     if (!v)
@@ -95,12 +86,9 @@ void vulkan_destroy(Vulkan *v) {
     instance_destroy(v->instance);
     delete v;
 }
-bool vulkan_begin(Vulkan &v, uint32_t w, uint32_t h) {
+bool vulkan_draw(Vulkan &v, uint32_t w, uint32_t h, float time) {
     if (!w || !h)
         return false;
-    if (v.frame_open)
-        throw std::runtime_error("Frame already open");
-    auto start = Clock::now();
     if (v.recreate || w != v.requested_width || h != v.requested_height)
         rebuild(v, w, h);
     auto &f = v.frames[v.slot];
@@ -117,16 +105,7 @@ bool vulkan_begin(Vulkan &v, uint32_t w, uint32_t h) {
     else
         VK_CHECK(result);
     VK_CHECK(vkResetCommandPool(v.device.handle, f.commands.pool, 0));
-    v.stats.wait_ms = elapsed(start);
-    v.frame_open = true;
-    return true;
-}
-void vulkan_draw(Vulkan &v, const RenderData &data, OverlayRecorder overlay, void *user,
-                 double frame_ms, double app_cpu_ms) {
-    if (!v.frame_open)
-        throw std::runtime_error("Invalid render data/frame state");
     auto start = Clock::now();
-    auto &f = v.frames[v.slot];
     auto cmd = f.commands.buffer;
     auto &s = v.swapchain;
     commands_begin(cmd);
@@ -155,25 +134,11 @@ void vulkan_draw(Vulkan &v, const RenderData &data, OverlayRecorder overlay, voi
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, v.pipeline.handle);
+    FrameData data{float(s.extent.width), float(s.extent.height), time};
     vkCmdPushConstants(cmd, v.pipeline.layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(data),
                        &data);
     vkCmdDraw(cmd, 3, 1, 0, 0);
     vkCmdEndRendering(cmd);
-    if (overlay) {
-        // Explicit attachment dependency between the scene and overlay rendering scopes.
-        image_barrier(cmd, s.images[v.image], VK_IMAGE_ASPECT_COLOR_BIT,
-                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                      VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-        color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        rendering.pDepthAttachment = nullptr;
-        vkCmdBeginRendering(cmd, &rendering);
-        overlay(cmd, user);
-        vkCmdEndRendering(cmd);
-    }
     image_barrier(
         cmd, s.images[v.image], VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0,
@@ -195,41 +160,22 @@ void vulkan_draw(Vulkan &v, const RenderData &data, OverlayRecorder overlay, voi
     VK_CHECK(vkResetFences(v.device.handle, 1, &f.sync.complete));
     VK_CHECK(vkQueueSubmit(v.device.queues.graphics, 1, &submit, f.sync.complete));
     f.timestamps.submitted = true;
-    v.stats.cpu_work_ms = app_cpu_ms + elapsed(start);
-    auto present_start = Clock::now();
+    v.stats.cpu_work_ms = elapsed(start);
     VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     present.waitSemaphoreCount = 1;
     present.pWaitSemaphores = &s.present_ready[v.image];
     present.swapchainCount = 1;
     present.pSwapchains = &s.handle;
     present.pImageIndices = &v.image;
-    auto result = vkQueuePresentKHR(v.device.queues.present, &present);
+    result = vkQueuePresentKHR(v.device.queues.present, &present);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
         v.recreate = true;
     else
         VK_CHECK(result);
-    v.stats.wait_ms += elapsed(present_start);
-    v.stats.frame_ms = frame_ms;
-    v.stats.draws = 1;
-    v.stats.triangles = 1;
     ++v.stats.submitted_frames;
     v.slot = (v.slot + 1) % uint32_t(v.frames.size());
-    v.frame_open = false;
-}
-GuiDeviceInfo vulkan_gui_info(const Vulkan &v) {
-    return {v.instance.handle,
-            v.device.physical,
-            v.device.handle,
-            v.device.queues.graphics,
-            v.device.queues.graphics_family,
-            v.swapchain.format,
-            v.swapchain.min_images,
-            uint32_t(v.swapchain.images.size()),
-            v.generation};
+    return true;
 }
 FrameStats vulkan_stats(const Vulkan &v) {
     return v.stats;
-}
-float vulkan_aspect(const Vulkan &v) {
-    return float(v.swapchain.extent.width) / float(v.swapchain.extent.height);
 }

@@ -6,7 +6,7 @@ void pipeline_create(const Device &d, Pipeline &p, VkFormat format,
     try {
         vs = shader_load(d.handle, directory / "fullscreen.vert.spv");
         ps = shader_load(d.handle, directory / "raymarch.frag.spv");
-        VkPushConstantRange range{VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(RenderData)};
+        VkPushConstantRange range{VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(FrameData)};
         VkPipelineLayoutCreateInfo li{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
         li.pushConstantRangeCount = 1;
         li.pPushConstantRanges = &range;
@@ -20,7 +20,7 @@ void pipeline_create(const Device &d, Pipeline &p, VkFormat format,
         stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
         stages[1].module = ps;
         stages[1].pName = "main";
-        // Full-screen triangle vertices are generated from SV_VertexID in HLSL.
+        // The vertex shader generates a full-screen triangle from gl_VertexIndex.
         VkPipelineVertexInputStateCreateInfo vertex{
             VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
         VkPipelineInputAssemblyStateCreateInfo assembly{

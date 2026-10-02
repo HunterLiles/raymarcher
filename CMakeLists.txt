@@ -32,18 +32,20 @@ FetchContent_Declare(
   glfw URL https://github.com/glfw/glfw/archive/refs/tags/3.4.tar.gz
            DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(glfw)
-set(generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
-file(MAKE_DIRECTORY "${generated}")
 set(shader_dir "${CMAKE_CURRENT_BINARY_DIR}/compiled-shaders")
 file(MAKE_DIRECTORY "${shader_dir}")
 foreach(shader fullscreen.vert raymarch.frag)
+  get_filename_component(stage "${shader}" LAST_EXT)
+  string(SUBSTRING "${stage}" 1 -1 stage)
   add_custom_command(
     OUTPUT "${shader_dir}/${shader}.spv"
     COMMAND
-      "${GLSLC_EXECUTABLE}" -std=glsl-4.60 -mfmt=generic -c -o
+      "${GLSLC_EXECUTABLE}" -fshader-stage=${stage} --target-env=vulkan1.3 -Werror -MD
+      -MF "${shader_dir}/${shader}.d" -c -o
       "${shader_dir}/${shader}.spv"
       "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${shader}.glsl"
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${shader}.glsl"
+    DEPFILE "${shader_dir}/${shader}.d"
     VERBATIM)
   list(APPEND shader_outputs "${shader_dir}/${shader}.spv")
 endforeach()
@@ -51,21 +53,19 @@ add_custom_target(shaders DEPENDS ${shader_outputs})
 add_executable(
   vulkan_starter
   src/main.cpp
-  src/input.cpp
-  src/camera.cpp
   src/platform.cpp
   src/vulkan/vulkan.cpp
   src/vulkan/instance.cpp
   src/vulkan/devices.cpp
   src/vulkan/queues.cpp
   src/vulkan/swapchain.cpp
-  src/vulkan/buffers.cpp
   src/vulkan/images.cpp
   src/vulkan/commands.cpp
   src/vulkan/synchronization.cpp
   src/vulkan/timestamps.cpp
   src/vulkan/shaders.cpp
   src/vulkan/pipelines.cpp)
+target_link_libraries(vulkan_starter PRIVATE glfw Vulkan::Vulkan)
 target_compile_definitions(vulkan_starter PRIVATE GLFW_INCLUDE_NONE NOMINMAX)
 if(MSVC)
   target_compile_options(vulkan_starter PRIVATE /W4 /permissive-)
@@ -80,9 +80,9 @@ add_custom_target(
   COMMAND "${CMAKE_COMMAND}" -E make_directory
           "$<TARGET_FILE_DIR:vulkan_starter>/shaders"
   COMMAND
-    "${CMAKE_COMMAND}" -E copy_if_different "${shader_dir}/raymarch.frag.spv"
+    "${CMAKE_COMMAND}" -E copy_if_different ${shader_outputs}
     "$<TARGET_FILE_DIR:vulkan_starter>/shaders"
   DEPENDS shaders vulkan_starter
   VERBATIM)
 install(TARGETS vulkan_starter RUNTIME DESTINATION bin)
-install(FILES "${shader_dir}/raymarch.frag.spv" DESTINATION bin/shaders)
+install(FILES ${shader_outputs} DESTINATION bin/shaders)

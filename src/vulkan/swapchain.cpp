@@ -24,13 +24,9 @@ void swapchain_create(const Device &d, Swapchain &s, VkSurfaceKHR surface, uint3
     if (s.extent.width == UINT32_MAX)
         s.extent = {std::clamp(width, caps.minImageExtent.width, caps.maxImageExtent.width),
                     std::clamp(height, caps.minImageExtent.height, caps.maxImageExtent.height)};
-    s.min_images = std::max(2u, caps.minImageCount);
-    uint32_t count = s.min_images + 1;
-    if (caps.maxImageCount) {
+    uint32_t count = caps.minImageCount + 1;
+    if (caps.maxImageCount)
         count = std::min(count, caps.maxImageCount);
-        if (count < s.min_images)
-            throw std::runtime_error("ImGui requires at least two swapchain images");
-    }
     VkCompositeAlphaFlagBitsKHR alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     for (auto a : {VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
                    VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR, VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR})

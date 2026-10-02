@@ -13,9 +13,9 @@ vec3 calc_norm(in vec3 p) {
 vec3 lighting(in vec3 p) {
 
     vec3 normal = calc_norm(p);
-    vec3 light_pos = vec3(sin(iTime), 3.0, cos(iTime));
-    vec3 dir_to_light = normalize(light_pos);
+    vec3 light_pos = vec3(sin(frame.time), 3.0, cos(frame.time));
+    vec3 dir_to_light = normalize(light_pos - p);
 
-    float diffuse_intensity = max(0.0f, length(normal * dir_to_light));
+    float diffuse_intensity = max(0.0, dot(normal, dir_to_light));
     return normal * diffuse_intensity;
 }

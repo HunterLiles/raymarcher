@@ -5,7 +5,6 @@ struct Swapchain {
     VkSwapchainKHR handle{};
     VkFormat format{};
     VkExtent2D extent{};
-    uint32_t min_images{};
     std::vector<VkImage> images;
     std::vector<VkImageView> views;
     // Presentation completion is tied to reacquiring an image, not a frame fence.
