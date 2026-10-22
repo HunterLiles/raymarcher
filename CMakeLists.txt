@@ -1,59 +1,82 @@
 cmake_minimum_required(VERSION 3.24)
-project(
-  VulkanStarter
-  VERSION 0.1
-  LANGUAGES C CXX)
+
+project(Vulkan LANGUAGES C CXX)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-if(NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  message(FATAL_ERROR "This starter targets Windows and Linux")
-endif()
+
+# Vulkan
 find_package(Vulkan 1.3 REQUIRED)
+
 find_program(
   GLSLC_EXECUTABLE
   NAMES glslc
   HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin" REQUIRED)
+
+# GLFW
 include(FetchContent)
+
 set(GLFW_BUILD_DOCS
     OFF
     CACHE BOOL "" FORCE)
+
 set(GLFW_BUILD_TESTS
     OFF
     CACHE BOOL "" FORCE)
+
 set(GLFW_BUILD_EXAMPLES
     OFF
     CACHE BOOL "" FORCE)
+
 set(GLFW_INSTALL
     OFF
     CACHE BOOL "" FORCE)
+
 FetchContent_Declare(
   glfw URL https://github.com/glfw/glfw/archive/refs/tags/3.4.tar.gz
            DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+
 FetchContent_MakeAvailable(glfw)
-set(shader_dir "${CMAKE_CURRENT_BINARY_DIR}/compiled-shaders")
+
+# Shaders
+set(shader_dir "${CMAKE_CURRENT_BINARY_DIR}/shaders")
 file(MAKE_DIRECTORY "${shader_dir}")
-foreach(shader fullscreen.vert raymarch.frag)
+
+file(
+  GLOB
+  shaders
+  CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.vert.glsl"
+  "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.frag.glsl"
+  "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.comp.glsl")
+
+foreach(source IN LISTS shaders)
+  get_filename_component(filename "${source}" NAME)
+  string(REGEX REPLACE "\\.glsl$" "" shader "${filename}")
   get_filename_component(stage "${shader}" LAST_EXT)
   string(SUBSTRING "${stage}" 1 -1 stage)
+
+  set(output "${shader_dir}/${shader}.spv")
+
   add_custom_command(
-    OUTPUT "${shader_dir}/${shader}.spv"
-    COMMAND
-      "${GLSLC_EXECUTABLE}" -fshader-stage=${stage} --target-env=vulkan1.3 -Werror -MD
-      -MF "${shader_dir}/${shader}.d" -c -o
-      "${shader_dir}/${shader}.spv"
-      "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${shader}.glsl"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${shader}.glsl"
-    DEPFILE "${shader_dir}/${shader}.d"
+    OUTPUT "${output}"
+    COMMAND "${GLSLC_EXECUTABLE}" -fshader-stage=${stage} --target-env=vulkan1.3
+            -Werror -MD -MF "${output}.d" -c "${source}" -o "${output}"
+    DEPENDS "${source}"
+    DEPFILE "${output}.d"
     VERBATIM)
-  list(APPEND shader_outputs "${shader_dir}/${shader}.spv")
+
+  list(APPEND shader_outputs "${output}")
 endforeach()
+
 add_custom_target(shaders DEPENDS ${shader_outputs})
+
+# Compiling
 add_executable(
-  vulkan_starter
+  vulkan
   src/main.cpp
-  src/platform.cpp
   src/vulkan/vulkan.cpp
   src/vulkan/instance.cpp
   src/vulkan/devices.cpp
@@ -65,24 +88,13 @@ add_executable(
   src/vulkan/timestamps.cpp
   src/vulkan/shaders.cpp
   src/vulkan/pipelines.cpp)
-target_link_libraries(vulkan_starter PRIVATE glfw Vulkan::Vulkan)
-target_compile_definitions(vulkan_starter PRIVATE GLFW_INCLUDE_NONE NOMINMAX)
-if(MSVC)
-  target_compile_options(vulkan_starter PRIVATE /W4 /permissive-)
-else()
-  target_compile_options(vulkan_starter PRIVATE -Wall -Wextra -Wpedantic
-                                                -Wno-missing-field-initializers)
-endif()
-# An ALL target also copies shader-only rebuilds; POST_BUILD alone would miss
-# those.
-add_custom_target(
-  runtime_shaders ALL
-  COMMAND "${CMAKE_COMMAND}" -E make_directory
-          "$<TARGET_FILE_DIR:vulkan_starter>/shaders"
-  COMMAND
-    "${CMAKE_COMMAND}" -E copy_if_different ${shader_outputs}
-    "$<TARGET_FILE_DIR:vulkan_starter>/shaders"
-  DEPENDS shaders vulkan_starter
-  VERBATIM)
-install(TARGETS vulkan_starter RUNTIME DESTINATION bin)
+
+target_link_libraries(vulkan PRIVATE glfw Vulkan::Vulkan)
+target_compile_definitions(vulkan PRIVATE GLFW_INCLUDE_NONE)
+
+target_compile_options(vulkan PRIVATE -Wall -Wextra -Wpedantic)
+
+add_dependencies(vulkan shaders)
+
+install(TARGETS vulkan RUNTIME DESTINATION bin)
 install(FILES ${shader_outputs} DESTINATION bin/shaders)
