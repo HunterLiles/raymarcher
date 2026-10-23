@@ -19,13 +19,15 @@ void image_barrier(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect
     vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &b);
 }
 
-void image_create(const Device &d, RenderImage &image) {
+void image_create(const Device &d, RenderImage &image, VkExtent2D extent) {
     constexpr VkFormat render_format = VK_FORMAT_R8G8B8A8_UNORM;
 
     VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    image.extent = extent;
+
     ci.imageType = VK_IMAGE_TYPE_2D;
     ci.format = render_format;
-    ci.extent = {320, 180, 1};
+    ci.extent = {extent.width, extent.height, 1};
     ci.mipLevels = 1;
     ci.arrayLayers = 1;
     ci.samples = VK_SAMPLE_COUNT_1_BIT;

@@ -1,0 +1,59 @@
+#include "common.glsl"
+
+float stars(vec3 direction) {
+    const float pi = 3.14159265;
+
+    vec2 uv = vec2(atan(direction.z, direction.x) / (2.0 * pi) + 0.5,
+                   asin(clamp(direction.y, -1.0, 1.0)) / pi + 0.5);
+
+    vec2 grid = uv * vec2(180.0, 90.0);
+    vec2 cell = floor(grid);
+    vec2 local = fract(grid);
+
+    float seed = hash(cell);
+
+    vec2 center = mix(vec2(0.25), vec2(0.75), vec2(hash(cell + 17.0), hash(cell + 53.0)));
+
+    float shape = 1.0 - smoothstep(0.05, 0.20, length(local - center));
+
+    return shape * step(0.985, seed) * mix(0.5, 1.0, seed);
+}
+
+vec3 sky(vec3 direction) {
+    direction = normalize(direction);
+
+    vec3 sun_dir = sun_direction();
+    vec3 moon_dir = -sun_dir;
+
+    float daylight = daylight_amount(sun_dir);
+    float night = 1.0 - daylight;
+    float elevation = sqrt(clamp(direction.y, 0.0, 1.0));
+
+    vec3 day_sky = mix(vec3(0.65, 0.55, 0.60), vec3(0.12, 0.20, 0.38), elevation);
+
+    vec3 night_sky = mix(vec3(0.025, 0.025, 0.065), vec3(0.003, 0.005, 0.020), elevation);
+
+    vec3 galaxy_axis = normalize(vec3(0.3, 0.8, 0.5));
+    float band_distance = abs(dot(direction, galaxy_axis));
+    float band = 1.0 - smoothstep(0.02, 0.22, band_distance);
+
+    float clouds = ground_noise(direction.xz * 8.0 + direction.y * 3.0);
+    vec3 galaxy = mix(vec3(0.06, 0.08, 0.18), vec3(0.22, 0.10, 0.25), clouds);
+
+    float visibility = smoothstep(0.0, 0.2, direction.y);
+
+    night_sky += galaxy * band * clouds * visibility;
+    night_sky += vec3(0.8, 0.85, 1.0) * stars(direction) * visibility;
+
+    vec3 result = mix(night_sky, day_sky, daylight);
+
+    float sun = step(cos(0.045), dot(direction, sun_dir));
+    sun *= smoothstep(-0.05, 0.05, sun_dir.y);
+    result = mix(result, vec3(1.0, 0.85, 0.55), sun);
+
+    float moon = step(cos(0.035), dot(direction, moon_dir));
+    moon *= smoothstep(0.0, 0.05, moon_dir.y) * night;
+    result = mix(result, vec3(0.65, 0.75, 0.95), moon);
+
+    return result;
+}

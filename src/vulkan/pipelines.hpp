@@ -10,13 +10,16 @@ struct alignas(16) FrameData {
     vec4 camera_pos;
     vec2 resolution;
     float time;
+    float padding{};
+    vec4 metrics;
 };
 
 static_assert(offsetof(FrameData, camera_rot) == 0);
 static_assert(offsetof(FrameData, camera_pos) == 16);
 static_assert(offsetof(FrameData, resolution) == 32);
 static_assert(offsetof(FrameData, time) == 40);
-static_assert(sizeof(FrameData) == 48);
+static_assert(offsetof(FrameData, metrics) == 48);
+static_assert(sizeof(FrameData) == 64);
 
 struct Pipeline {
     VkPipeline handle{};

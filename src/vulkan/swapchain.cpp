@@ -61,7 +61,7 @@ void swapchain_create(const Device &d, Swapchain &s, VkSurfaceKHR surface, uint3
     ci.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     ci.preTransform = caps.currentTransform;
     ci.compositeAlpha = alpha;
-    ci.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    ci.presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
     ci.clipped = VK_TRUE;
     ci.imageSharingMode =
         families[0] == families[1] ? VK_SHARING_MODE_EXCLUSIVE : VK_SHARING_MODE_CONCURRENT;

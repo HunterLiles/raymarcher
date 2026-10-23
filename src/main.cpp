@@ -82,7 +82,8 @@ int main() {
             controller.camera_rotate(camera, window);
             controller.camera_move(camera, dt, window);
             elapsed_seconds += dt;
-            vulkan_draw(*renderer, uint32_t(width), uint32_t(height), elapsed_seconds, camera);
+            vulkan_draw(*renderer, uint32_t(width), uint32_t(height), elapsed_seconds, camera,
+                        float(frame_ms));
         }
 
         auto stats = vulkan_stats(*renderer);

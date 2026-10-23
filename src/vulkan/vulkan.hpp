@@ -17,6 +17,7 @@ void vulkan_initialize(Vulkan &, VkSurfaceKHR, uint32_t width, uint32_t height,
 
 void vulkan_destroy(Vulkan *);
 
-bool vulkan_draw(Vulkan &, uint32_t width, uint32_t height, float time, const Camera &);
+bool vulkan_draw(Vulkan &, uint32_t width, uint32_t height, float time, const Camera &,
+                 float frame_ms);
 
 FrameStats vulkan_stats(const Vulkan &);

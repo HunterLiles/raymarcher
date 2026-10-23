@@ -39,6 +39,7 @@ struct Vulkan {
 
     std::filesystem::path shaders;
     FrameStats stats;
+    float frame_ms{};
 };
 
 static void descriptors_create(Vulkan &v) {
@@ -81,7 +82,6 @@ static void frame_create(const Device &d, Frame &f) {
     commands_create(d, f.commands);
     sync_create(d, f.sync);
     timestamps_create(d, f.timestamps);
-    image_create(d, f.output);
 }
 
 // The caller waits for the device before destroying frame resources.
@@ -116,6 +116,20 @@ static void rebuild(Vulkan &v, uint32_t w, uint32_t h) {
     swapchain_destroy(d, v.swapchain);
     swapchain_create(d, v.swapchain, v.surface, w, h);
 
+    if (v.descriptor_pool) {
+        vkDestroyDescriptorPool(d.handle, v.descriptor_pool, nullptr);
+        v.descriptor_pool = {};
+    }
+
+    VkExtent2D extent = render_extent(v.swapchain.extent.width, v.swapchain.extent.height);
+
+    for (auto &f : v.frames) {
+        image_destroy(d, f.output);
+        image_create(d, f.output, extent);
+    }
+
+    descriptors_create(v);
+
     v.requested_width = w;
     v.requested_height = h;
     v.recreate = false;
@@ -132,7 +146,6 @@ void vulkan_initialize(Vulkan &v, VkSurfaceKHR surface, uint32_t w, uint32_t h,
     for (auto &f : v.frames)
         frame_create(v.device, f);
 
-    descriptors_create(v);
     rebuild(v, w, h);
     v.stats.device_name = v.device.properties.deviceName;
 }
@@ -203,9 +216,13 @@ static void record_compute(Vulkan &v, Frame &f, float time, const Camera &camera
     FrameData data{camera.orientation,
                    {camera.pos.x, camera.pos.y, camera.pos.z, 0.0f},
                    {float(v.swapchain.extent.width), float(v.swapchain.extent.height)},
-                   time};
+                   time,
+                   0.0f,
+                   {v.frame_ms > 0.0f ? 1000.0f / v.frame_ms : 0.0f, v.frame_ms,
+                    float(v.stats.cpu_work_ms),
+                    v.stats.gpu_available ? float(v.stats.gpu_ms) : -1.0f}};
     vkCmdPushConstants(cmd, v.pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(data), &data);
-    vkCmdDispatch(cmd, 40, 23, 1);
+    vkCmdDispatch(cmd, (output.extent.width + 7) / 8, (output.extent.height + 7) / 8, 1);
 
     image_barrier(cmd, output.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL,
                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_SHADER_WRITE_BIT,
@@ -225,7 +242,7 @@ static void record_blit(Vulkan &v, Frame &f, uint32_t image) {
     VkImageBlit region{};
     region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.srcOffsets[0] = {0, 0, 0};
-    region.srcOffsets[1] = {320, 180, 1};
+    region.srcOffsets[1] = {int32_t(f.output.extent.width), int32_t(f.output.extent.height), 1};
     region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.dstOffsets[0] = {0, 0, 0};
     region.dstOffsets[1] = {int32_t(s.extent.width), int32_t(s.extent.height), 1};
@@ -292,7 +309,10 @@ static void frame_present(Vulkan &v, uint32_t image) {
         VK_CHECK(result);
 }
 
-bool vulkan_draw(Vulkan &v, uint32_t w, uint32_t h, float time, const Camera &camera) {
+bool vulkan_draw(Vulkan &v, uint32_t w, uint32_t h, float time, const Camera &camera,
+                 float frame_ms) {
+    v.frame_ms = frame_ms;
+
     if (!w || !h)
         return false;
 
