@@ -12,9 +12,10 @@ struct RenderImage {
     bool initialized{};
 };
 
-inline uint32_t pixel_size = 3;
+inline uint32_t pixel_size = 2;
 
-inline VkExtent2D render_extent(uint32_t window_width, uint32_t window_height) {
+inline VkExtent2D render_extent(uint32_t window_width, uint32_t window_height,
+                                uint32_t pixel_size) {
     return {(window_width + pixel_size - 1) / pixel_size,
             (window_height + pixel_size - 1) / pixel_size};
 }

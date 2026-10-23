@@ -2,6 +2,8 @@
 
 #include <cmath>
 
+namespace engine {
+
 struct vec2 {
     float x{}, y{};
 };
@@ -91,3 +93,4 @@ inline vec3 rotate(quaternion q, vec3 v) {
     vec3 t = cross(axis, v) * 2.0f;
     return v + t * q.w + cross(axis, t);
 }
+} // namespace engine

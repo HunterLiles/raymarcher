@@ -49,13 +49,12 @@ uint hud_glyph(uint character) {
     }
 }
 
-// Seven characters: four integer digits, a dot, two decimals.
 uint hud_number(float value, int column) {
     if (value < 0.0)
-        return 45u; // Unavailable: dashes.
+        return 45u;
 
     if (column == 4)
-        return 46u; // Decimal point.
+        return 46u;
 
     uint number = uint(round(clamp(value, 0.0, 9999.99) * 100.0));
 
@@ -64,14 +63,14 @@ uint hud_number(float value, int column) {
     int digit = column < 4 ? column : column - 1;
     uint divisor = divisors[digit];
 
-    // Hide leading zeroes, retaining the units digit.
     if (column < 3 && number < divisor)
         return 32u;
 
     return 48u + (number / divisor) % 10u;
 }
 
-vec3 draw_hud(vec3 background, ivec2 pixel) {
+// Debug HUD
+vec3 draw_debug_hud(vec3 background, ivec2 pixel) {
     const int scale = 1;
     ivec2 p = pixel - ivec2(4);
 
@@ -83,7 +82,6 @@ vec3 draw_hud(vec3 background, ivec2 pixel) {
     int row = p.y / 7;
     int column = p.x / 4;
 
-    // Five characters per label: FPS, FRAME, CPU, GPU.
     const uint labels[20] = uint[20](70u, 80u, 83u, 32u, 32u, 70u, 82u, 65u, 77u, 69u, 67u, 80u,
                                      85u, 32u, 32u, 71u, 80u, 85u, 32u, 32u);
 
@@ -94,9 +92,9 @@ vec3 draw_hud(vec3 background, ivec2 pixel) {
     else if (column >= 6 && column <= 12)
         character = hud_number(frame.metrics[row], column - 6);
     else if (row > 0 && column == 14)
-        character = 77u; // M
+        character = 77u;
     else if (row > 0 && column == 15)
-        character = 83u; // S
+        character = 83u;
 
     ivec2 cell = ivec2(p.x % 4, p.y % 7);
     bool ink = false;
@@ -108,4 +106,47 @@ vec3 draw_hud(vec3 background, ivec2 pixel) {
 
     vec3 panel = background * 0.2;
     return ink ? vec3(0.95, 0.9, 0.75) : panel;
+}
+
+// Game HUD
+vec3 hud_bar(vec3 background, ivec2 p, ivec2 size, float amount, vec3 fill) {
+    if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, size)))
+        return background;
+
+    bool edge_x = p.x == 0 || p.x == size.x - 1;
+    bool edge_y = p.y == 0 || p.y == size.y - 1;
+
+    if (edge_x && edge_y)
+        return background;
+
+    if (edge_x || edge_y)
+        return vec3(0.48, 0.39, 0.24);
+
+    int filled = int(round(float(size.x - 4) * clamp(amount, 0.0, 1.0)));
+
+    bool inside_fill = p.x >= 2 && p.x < 2 + filled && p.y >= 2 && p.y < size.y - 2;
+
+    if (inside_fill)
+        return fill * (p.y == 2 ? 1.2 : 1.0);
+
+    return background * 0.15;
+}
+
+vec3 draw_hud(vec3 background, ivec2 pixel) {
+    ivec2 screen = imageSize(image);
+    ivec2 origin = ivec2(8, screen.y - 31);
+
+    const float health = 0.75;
+    const float magic = 0.55;
+    const float stamina = 0.90;
+
+    background = hud_bar(background, pixel - origin, ivec2(88, 7), health, vec3(0.65, 0.16, 0.12));
+
+    background = hud_bar(background, pixel - origin - ivec2(0, 9), ivec2(72, 7), magic,
+                         vec3(0.20, 0.35, 0.65));
+
+    background = hud_bar(background, pixel - origin - ivec2(0, 18), ivec2(56, 5), stamina,
+                         vec3(0.42, 0.52, 0.28));
+
+    return background;
 }

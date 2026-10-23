@@ -73,31 +73,43 @@ endforeach()
 
 add_custom_target(shaders DEPENDS ${shader_outputs})
 
-# Compiling
-add_executable(
-  vulkan
-  src/main.cpp
-  scripts/controller.cpp
-  src/vulkan/vulkan.cpp
-  src/vulkan/instance.cpp
-  src/vulkan/devices.cpp
-  src/vulkan/queues.cpp
-  src/vulkan/swapchain.cpp
-  src/vulkan/images.cpp
-  src/vulkan/commands.cpp
-  src/vulkan/synchronization.cpp
-  src/vulkan/timestamps.cpp
-  src/vulkan/shaders.cpp
-  src/vulkan/pipelines.cpp)
+# Engine
+add_library(
+  engine STATIC
+  engine/engine.cpp
+  engine/hot_reload.cpp
+  engine/vulkan/caches.cpp
+  engine/vulkan/vulkan.cpp
+  engine/vulkan/instance.cpp
+  engine/vulkan/devices.cpp
+  engine/vulkan/queues.cpp
+  engine/vulkan/swapchain.cpp
+  engine/vulkan/images.cpp
+  engine/vulkan/commands.cpp
+  engine/vulkan/synchronization.cpp
+  engine/vulkan/timestamps.cpp
+  engine/vulkan/shaders.cpp
+  engine/vulkan/pipelines.cpp)
 
-target_include_directories(vulkan PRIVATE src scripts)
-target_link_libraries(vulkan PRIVATE glfw Vulkan::Vulkan)
-target_compile_definitions(vulkan PRIVATE GLFW_INCLUDE_NONE)
+target_include_directories(engine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_features(engine PUBLIC cxx_std_20)
+target_link_libraries(
+  engine
+  PUBLIC glfw
+  PRIVATE Vulkan::Vulkan)
+target_compile_definitions(engine PUBLIC GLFW_INCLUDE_NONE)
 
-target_compile_options(vulkan PRIVATE -Wall -Wextra -Wpedantic
+target_compile_options(engine PRIVATE -Wall -Wextra -Wpedantic
                                       -Wno-missing-field-initializers)
 
-add_dependencies(vulkan shaders)
+# Game
+add_executable(game main.cpp scripts/controller.cpp)
+target_link_libraries(game PRIVATE engine)
+target_compile_options(game PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_definitions(
+  game PRIVATE GAME_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+               GAME_GLSLC="${GLSLC_EXECUTABLE}")
+add_dependencies(game shaders)
 
-install(TARGETS vulkan RUNTIME DESTINATION bin)
+install(TARGETS game RUNTIME DESTINATION bin)
 install(FILES ${shader_outputs} DESTINATION bin/shaders)

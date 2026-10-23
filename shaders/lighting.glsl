@@ -1,15 +1,12 @@
-vec3 tangentNormal(vec3 p) {
-    // Defining its nabla f (∇f) or gradient
-    float e = 0.005;
+// PBR
+struct Material {
+    vec3 albedo;
+    vec3 emission;
+};
 
-    return normalize(vec3(map(p + vec3(e, 0, 0)).distance - map(p - vec3(e, 0, 0)).distance,
-                          map(p + vec3(0, e, 0)).distance - map(p - vec3(0, e, 0)).distance,
-                          map(p + vec3(0, 0, e)).distance - map(p - vec3(0, 0, e)).distance));
-}
-
-vec3 material_color(vec3 p, int material) {
+Material get_material(vec3 p, int material) {
     if (material == 1)
-        return vec3(1.0, 0.03, 0.01);
+        return Material(vec3(1.0, 0.03, 0.01), vec3(1.0, 0.15, 0.02) * 2.0);
 
     vec2 uv = p.xz;
 
@@ -22,31 +19,129 @@ vec3 material_color(vec3 p, int material) {
     float grass_amount = smoothstep(0.35, 0.65, patches);
 
     vec3 base = mix(dirt, grass, grass_amount);
-    return base * mix(0.75, 1.15, detail);
+    return Material(base * mix(0.75, 1.15, detail), vec3(0.0));
 }
 
-vec3 color(vec3 obj, int material) {
-    vec3 normal = tangentNormal(obj);
+// Normal of the object for lighting using gradients
+vec3 tangentNormal(vec3 p, int material, out float field_scale) {
+    vec3 gradient;
 
-    vec3 sun_dir = sun_direction();
-    vec3 moon_dir = -sun_dir;
+    if (material == 0) {
+        vec2 slope;
+        terrain_height(p.xz, slope);
+        gradient = vec3(-slope.x, 1.0, -slope.y) * terrain_distance_scale;
+    } else {
 
-    float day_light = daylight_amount(sun_dir);
-    float sun_str = smoothstep(0.0, 0.15, sun_dir.y);
+        // Defining its nabla f (∇f) or gradient
+        float e = 0.005;
 
-    float moon_str = smoothstep(0.0, 0.15, moon_dir.y);
-    float moon_diffuse = max(dot(normal, moon_dir), 0.0);
+        gradient = vec3(map(p + vec3(e, 0, 0)).distance - map(p - vec3(e, 0, 0)).distance,
+                        map(p + vec3(0, e, 0)).distance - map(p - vec3(0, e, 0)).distance,
+                        map(p + vec3(0, 0, e)).distance - map(p - vec3(0, 0, e)).distance) /
+                   (2.0 * e);
+    }
 
-    vec3 moon_light = vec3(0.08, 0.12, 0.22) * moon_diffuse * moon_str;
+    field_scale = max(length(gradient), 0.000001);
+    return gradient / field_scale;
+}
 
-    vec3 sun_color =
-        mix(vec3(1.0, 0.35, 0.12), vec3(1.0, 0.95, 0.85), smoothstep(0.0, 0.4, sun_dir.y));
+float AO(vec3 p, vec3 normal, float field_scale) {
+    float occlusion = 0.0;
+    float weight = 1.0;
+    float height = 0.1;
 
-    float diffuse = max(dot(normal, sun_dir), 0.0);
+    for (int i = 0; i < 3; ++i) {
+        float d = map(p + normal * height).distance / field_scale;
 
-    vec3 ambient = mix(vec3(0.015, 0.02, 0.04), vec3(0.18, 0.20, 0.25), day_light);
+        occlusion += weight * clamp(1.0 - d / height, 0.0, 1.0);
 
-    vec3 light = ambient + sun_color * diffuse * sun_str + moon_light;
+        height *= 2.0;
+        weight *= 0.5;
+    }
 
-    return material_color(obj, material) * light;
+    return clamp(1.0 - occlusion / 1.75, 0.0, 1.0);
+}
+
+// Send out a second ray from the object to the light source
+float shadow(vec3 origin, vec3 dir) {
+    float dist = 0.01;
+    float visibility = 1.0;
+
+    const int max_steps = 64;
+    const float max_dist = 50.0;
+    const float min_hit = 0.001;
+    const float sharp = 16.0;
+
+    for (int i = 0; i < max_steps; ++i) {
+        if (dist >= max_dist)
+            break;
+
+        float d = map(origin + dir * dist).distance;
+
+        if (d < min_hit)
+            return 0.0;
+
+        visibility = min(visibility, sharp * d / dist);
+        dist += d;
+    }
+
+    return clamp(visibility, 0.0, 1.0);
+} // returns value 0 -> 1 defining how visible it is
+
+vec3 point_light(vec3 p, vec3 normal, vec3 pos, vec3 emission, float power) {
+    vec3 offset = pos - p;
+    float dist_squared = max(dot(offset, offset), 0.0001);
+    vec3 dir = offset * inversesqrt(dist_squared);
+
+    float diffuse = max(dot(normal, dir), 0.0);
+    float attenuation = power / (1.0 + dist_squared);
+
+    return emission * diffuse * attenuation;
+}
+
+vec3 color(vec3 obj, vec3 normal, Material material, float field_scale, vec3 emitter_pos,
+           vec3 emitter_emission) {
+    vec3 sun = sun_direction();
+
+    bool isDay = sun.y >= 0.0;
+    float day_light = daylight_amount(sun);
+    float strength = smoothstep(0.0, 0.15, abs(sun.y));
+
+    vec3 light_dir = isDay ? sun : -sun;
+    float diffuse = max(dot(normal, light_dir), 0.0);
+
+    vec3 dir_color =
+        isDay ? mix(vec3(1.0, 0.35, 0.12), vec3(1.0, 0.95, 0.85), smoothstep(0.0, 0.4, sun.y))
+              : vec3(0.08, 0.12, 0.22) * 5.0;
+
+    vec3 sky_light = mix(vec3(0.06, 0.08, 0.12), vec3(0.18, 0.2, 0.25), day_light);
+    vec3 ground_light = sky_light * vec3(0.45, 0.35, 0.25);
+
+    vec3 ambient = mix(ground_light, sky_light, normal.y * 0.5 + 0.5);
+    ambient *= AO(obj, normal, field_scale);
+
+    float visibility = 1.0;
+
+    if (diffuse > 0.0 && strength > 0.0) {
+        visibility = shadow(obj + normal * 0.02, light_dir);
+    }
+
+    vec3 light = ambient + dir_color * diffuse * strength * visibility;
+    light += point_light(obj, normal, emitter_pos, emitter_emission, 4.0);
+
+    return material.albedo * light + material.emission;
+}
+
+// PSX dithering
+vec3 psx_color(vec3 rgb, ivec2 pixel) {
+    const float bayer[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0,
+                                      9.0, 15.0, 7.0, 13.0, 5.0);
+
+    int index = (pixel.y % 4) * 4 + (pixel.x % 4);
+    float threshold = (bayer[index] + 0.5) / 16.0;
+
+    const float levels = 32.0;
+    rgb = clamp(rgb, 0.0, 1.0);
+
+    return floor(rgb * (levels - 1.0) + threshold) / (levels - 1.0);
 }

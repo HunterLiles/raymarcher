@@ -1,4 +1,6 @@
 #include "vulkan.hpp"
+#include "../hot_reload.hpp"
+#include "caches.hpp"
 #include "commands.hpp"
 #include "images.hpp"
 #include "instance.hpp"
@@ -6,8 +8,13 @@
 #include "swapchain.hpp"
 #include "synchronization.hpp"
 #include "timestamps.hpp"
+#include <algorithm>
 #include <array>
 #include <chrono>
+#include <utility>
+
+using engine::Camera;
+using engine::FrameStats;
 
 using Clock = std::chrono::steady_clock;
 
@@ -30,6 +37,7 @@ struct Vulkan {
     Device device;
     Swapchain swapchain;
     Pipeline pipeline;
+    Caches caches;
     VkDescriptorPool descriptor_pool{};
 
     std::array<Frame, 2> frames{};
@@ -37,47 +45,85 @@ struct Vulkan {
     uint32_t requested_width{}, requested_height{};
     bool recreate{};
 
-    std::filesystem::path shaders;
+    uint32_t pixel_size{};
     FrameStats stats;
     float frame_ms{};
 };
 
-static void descriptors_create(Vulkan &v) {
-    auto device = v.device.handle;
-    uint32_t count = uint32_t(v.frames.size());
-
-    VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, count};
-
-    VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-    pool.maxSets = count;
-    pool.poolSizeCount = 1;
-    pool.pPoolSizes = &size;
-
-    VK_CHECK(vkCreateDescriptorPool(device, &pool, nullptr, &v.descriptor_pool));
+static void cache_descriptors_update(Vulkan &v) {
+    VkDescriptorBufferInfo buffer{v.caches.buffer, 0, v.caches.capacity};
 
     for (auto &f : v.frames) {
-        VkDescriptorSetAllocateInfo allocation{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-        allocation.descriptorPool = v.descriptor_pool;
-        allocation.descriptorSetCount = 1;
-        allocation.pSetLayouts = &v.pipeline.descriptor_layout;
-
-        VK_CHECK(vkAllocateDescriptorSets(device, &allocation, &f.descriptor));
-
-        VkDescriptorImageInfo image{};
-        image.imageView = f.output.view;
-        image.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
         VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         write.dstSet = f.descriptor;
-        write.dstBinding = 0;
+        write.dstBinding = 1;
         write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        write.pImageInfo = &image;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        write.pBufferInfo = &buffer;
 
-        vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+        vkUpdateDescriptorSets(v.device.handle, 1, &write, 0, nullptr);
     }
 }
 
+static void descriptors_build(Vulkan &v, const Pipeline &pipeline, VkBuffer buffer,
+                              VkDeviceSize capacity, VkDescriptorPool &handle,
+                              std::array<VkDescriptorSet, 2> &sets) {
+    auto device = v.device.handle;
+    uint32_t count = uint32_t(v.frames.size());
+
+    VkDescriptorPoolSize sizes[] = {
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, count},
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, count},
+    };
+
+    VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    pool.maxSets = count;
+    pool.poolSizeCount = 2;
+    pool.pPoolSizes = sizes;
+
+    VK_CHECK(vkCreateDescriptorPool(device, &pool, nullptr, &handle));
+
+    for (uint32_t i = 0; i < count; ++i) {
+        VkDescriptorSetAllocateInfo allocation{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        allocation.descriptorPool = handle;
+        allocation.descriptorSetCount = 1;
+        allocation.pSetLayouts = &pipeline.descriptor_layout;
+
+        VK_CHECK(vkAllocateDescriptorSets(device, &allocation, &sets[i]));
+
+        VkDescriptorImageInfo image{};
+        image.imageView = v.frames[i].output.view;
+        image.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        VkDescriptorBufferInfo storage{buffer, 0, capacity};
+        VkWriteDescriptorSet writes[2]{};
+
+        for (auto &write : writes) {
+            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.dstSet = sets[i];
+            write.descriptorCount = 1;
+        }
+
+        writes[0].dstBinding = 0;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[0].pImageInfo = &image;
+
+        writes[1].dstBinding = 1;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[1].pBufferInfo = &storage;
+
+        vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
+    }
+}
+
+static void descriptors_create(Vulkan &v) {
+    std::array<VkDescriptorSet, 2> sets{};
+
+    descriptors_build(v, v.pipeline, v.caches.buffer, v.caches.capacity, v.descriptor_pool, sets);
+
+    for (uint32_t i = 0; i < sets.size(); ++i)
+        v.frames[i].descriptor = sets[i];
+}
 static void frame_create(const Device &d, Frame &f) {
     commands_create(d, f.commands);
     sync_create(d, f.sync);
@@ -121,7 +167,8 @@ static void rebuild(Vulkan &v, uint32_t w, uint32_t h) {
         v.descriptor_pool = {};
     }
 
-    VkExtent2D extent = render_extent(v.swapchain.extent.width, v.swapchain.extent.height);
+    VkExtent2D extent =
+        render_extent(v.swapchain.extent.width, v.swapchain.extent.height, v.pixel_size);
 
     for (auto &f : v.frames) {
         image_destroy(d, f.output);
@@ -136,12 +183,20 @@ static void rebuild(Vulkan &v, uint32_t w, uint32_t h) {
 }
 
 void vulkan_initialize(Vulkan &v, VkSurfaceKHR surface, uint32_t w, uint32_t h,
-                       const std::filesystem::path &shaders) {
+                       const std::filesystem::path &shader, uint32_t pixel_size,
+                       const ShaderBuild *build) {
     v.surface = surface;
-    v.shaders = shaders;
+    v.pixel_size = pixel_size;
 
     device_create(v.device, v.instance.handle, surface);
-    pipeline_create(v.device, v.pipeline, v.shaders);
+    pipeline_create(v.device, v.pipeline, shader);
+
+    if (build)
+        for (const auto &cache : build->caches)
+            cache_add(v.device, v.caches, v.pipeline.layout, cache.id, build->cache, cache.count,
+                      cache.fps);
+
+    caches_prepare(v.device, v.caches);
 
     for (auto &f : v.frames)
         frame_create(v.device, f);
@@ -161,6 +216,7 @@ void vulkan_destroy(Vulkan *v) {
     if (v->descriptor_pool)
         vkDestroyDescriptorPool(d.handle, v->descriptor_pool, nullptr);
 
+    caches_destroy(d, v->caches);
     pipeline_destroy(d, v->pipeline);
 
     for (auto &f : v->frames)
@@ -209,6 +265,8 @@ static void record_compute(Vulkan &v, Frame &f, float time, const Camera &camera
         output.initialized ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
+    caches_record(v.device, v.caches, cmd, v.pipeline.layout, f.descriptor, time);
+
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, v.pipeline.handle);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, v.pipeline.layout, 0, 1,
                             &f.descriptor, 0, nullptr);
@@ -217,7 +275,6 @@ static void record_compute(Vulkan &v, Frame &f, float time, const Camera &camera
                    {camera.pos.x, camera.pos.y, camera.pos.z, 0.0f},
                    {float(v.swapchain.extent.width), float(v.swapchain.extent.height)},
                    time,
-                   0.0f,
                    {v.frame_ms > 0.0f ? 1000.0f / v.frame_ms : 0.0f, v.frame_ms,
                     float(v.stats.cpu_work_ms),
                     v.stats.gpu_available ? float(v.stats.gpu_ms) : -1.0f}};
@@ -316,6 +373,9 @@ bool vulkan_draw(Vulkan &v, uint32_t w, uint32_t h, float time, const Camera &ca
     if (!w || !h)
         return false;
 
+    if (caches_prepare(v.device, v.caches))
+        cache_descriptors_update(v);
+
     if (v.recreate || w != v.requested_width || h != v.requested_height)
         rebuild(v, w, h);
 
@@ -338,4 +398,82 @@ bool vulkan_draw(Vulkan &v, uint32_t w, uint32_t h, float time, const Camera &ca
 
 FrameStats vulkan_stats(const Vulkan &v) {
     return v.stats;
+}
+
+void vulkan_cache_create(Vulkan &v, uint32_t id, const std::filesystem::path &shader,
+                         uint32_t count, float fps) {
+    cache_add(v.device, v.caches, v.pipeline.layout, id, shader.lexically_normal(), count, fps);
+}
+
+void vulkan_cache_budget(Vulkan &v, VkDeviceSize bytes) {
+    v.caches.limit = bytes;
+    v.caches.dirty = true;
+}
+
+engine::CacheStats vulkan_cache_stats(const Vulkan &v) {
+    auto limit =
+        std::min(v.caches.limit, VkDeviceSize(v.device.properties.limits.maxStorageBufferRange));
+
+    return {v.caches.used, v.caches.allocated, limit};
+}
+
+void vulkan_reload(Vulkan &v, const ShaderBuild &build) {
+    auto &d = v.device;
+
+    Pipeline next_pipeline;
+    Caches next_caches;
+    next_caches.limit = v.caches.limit;
+
+    VkDescriptorPool next_pool{};
+    std::array<VkDescriptorSet, 2> next_sets{};
+
+    try {
+        pipeline_create(d, next_pipeline, build.render);
+
+        for (const auto &cache : build.caches)
+            cache_add(d, next_caches, next_pipeline.layout, cache.id, build.cache, cache.count,
+                      cache.fps);
+
+        bool reuse = next_caches.used <= v.caches.capacity;
+
+        if (reuse) {
+            // Prepare offsets without taking ownership of the live buffer.
+            next_caches.capacity = v.caches.capacity;
+            next_caches.allocated = v.caches.allocated;
+        } else {
+            // Both allocations must fit while staging a larger replacement.
+            next_caches.limit = v.caches.limit - v.caches.allocated;
+        }
+
+        caches_prepare(d, next_caches);
+        next_caches.limit = v.caches.limit;
+
+        descriptors_build(v, next_pipeline, reuse ? v.caches.buffer : next_caches.buffer,
+                          next_caches.capacity, next_pool, next_sets);
+
+        VK_CHECK(vkDeviceWaitIdle(d.handle));
+
+        if (reuse) {
+            next_caches.buffer = std::exchange(v.caches.buffer, VK_NULL_HANDLE);
+            next_caches.memory = std::exchange(v.caches.memory, VK_NULL_HANDLE);
+        }
+
+        std::swap(v.pipeline, next_pipeline);
+        std::swap(v.caches, next_caches);
+        std::swap(v.descriptor_pool, next_pool);
+
+        for (uint32_t i = 0; i < next_sets.size(); ++i)
+            v.frames[i].descriptor = next_sets[i];
+    } catch (...) {
+        if (next_pool)
+            vkDestroyDescriptorPool(d.handle, next_pool, nullptr);
+
+        caches_destroy(d, next_caches);
+        pipeline_destroy(d, next_pipeline);
+        throw;
+    }
+
+    vkDestroyDescriptorPool(d.handle, next_pool, nullptr);
+    caches_destroy(d, next_caches);
+    pipeline_destroy(d, next_pipeline);
 }

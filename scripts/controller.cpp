@@ -1,6 +1,8 @@
 #include "controller.hpp"
 #include <GLFW/glfw3.h>
-#include <cmath>
+#include <engine/engine_math.hpp>
+
+using namespace engine;
 
 void Controller::camera_move(Camera &camera, float dt, GLFWwindow *window) {
     vec3 move{};
