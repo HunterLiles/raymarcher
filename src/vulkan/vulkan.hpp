@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../camera.hpp"
 #include "../stats.hpp"
 #include "common.hpp"
 #include <filesystem>
@@ -11,16 +12,11 @@ Vulkan *vulkan_create(std::span<const char *const> instance_extensions, bool val
 
 VkInstance vulkan_instance(const Vulkan &);
 
-// Takes surface ownership immediately, including on initialization failure.
-void vulkan_initialize(Vulkan &,
-                       VkSurfaceKHR,
-                       uint32_t width,
-                       uint32_t height,
+void vulkan_initialize(Vulkan &, VkSurfaceKHR, uint32_t width, uint32_t height,
                        const std::filesystem::path &shaders);
 
 void vulkan_destroy(Vulkan *);
 
-// Returns false when no frame was submitted (zero extent or an out-of-date swapchain).
-bool vulkan_draw(Vulkan &, uint32_t width, uint32_t height, float time);
+bool vulkan_draw(Vulkan &, uint32_t width, uint32_t height, float time, const Camera &);
 
 FrameStats vulkan_stats(const Vulkan &);

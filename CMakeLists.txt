@@ -77,6 +77,7 @@ add_custom_target(shaders DEPENDS ${shader_outputs})
 add_executable(
   vulkan
   src/main.cpp
+  scripts/controller.cpp
   src/vulkan/vulkan.cpp
   src/vulkan/instance.cpp
   src/vulkan/devices.cpp
@@ -89,10 +90,12 @@ add_executable(
   src/vulkan/shaders.cpp
   src/vulkan/pipelines.cpp)
 
+target_include_directories(vulkan PRIVATE src scripts)
 target_link_libraries(vulkan PRIVATE glfw Vulkan::Vulkan)
 target_compile_definitions(vulkan PRIVATE GLFW_INCLUDE_NONE)
 
-target_compile_options(vulkan PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(vulkan PRIVATE -Wall -Wextra -Wpedantic
+                                      -Wno-missing-field-initializers)
 
 add_dependencies(vulkan shaders)
 

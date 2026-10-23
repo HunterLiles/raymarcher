@@ -1,18 +1,10 @@
 #version 460
 
-layout(local_size_x = 8, local_size_y = 8) in;
-layout(set = 0, binding = 0, rgba8) uniform writeonly image2D image;
-
-layout(push_constant) uniform Frame {
-    vec2 resolution;
-    float time;
-}
-
-frame;
-
 #include "sdf.glsl"
 
+#include "camera.glsl"
 #include "lighting.glsl"
+#include "post.glsl"
 
 vec3 raymarch(in vec3 ray_origin, in vec3 ray_dir) {
     float total_dist = 0.0f;
@@ -26,7 +18,8 @@ vec3 raymarch(in vec3 ray_origin, in vec3 ray_dir) {
         float closest_dist = map(curr_pos);
 
         if (closest_dist < MIN_HIT) {
-            return color(curr_pos);
+            float fog = 1.0 / (1.0 + total_dist / 10.0);
+            return color(curr_pos) * fog;
         }
 
         if (total_dist > MAX_DIST) {
@@ -46,12 +39,14 @@ void main() {
     if (any(greaterThanEqual(pixel, size)))
         return;
 
-    vec2 uv = (2.0 * (vec2(pixel) + 0.5) - vec2(size)) / vec2(size.y);
+    vec2 uv = 2.0 * (vec2(pixel) + 0.5) / vec2(size) - 1.0;
+    uv.x *= frame.resolution.x / frame.resolution.y;
     uv.y = -uv.y;
 
-    vec3 ray_origin = vec3(0.0, 0.0, -5.0);
-    vec3 ray_dir = normalize(vec3(uv, 1.0));
-    vec3 result = raymarch(ray_origin, ray_dir);
+    vec3 ray_origin = frame.camera_pos.xyz;
+    vec3 ray_dir = camera_dir(uv, frame.camera_rot);
 
+    vec3 result = raymarch(ray_origin, ray_dir);
+    result = psx_color(result, pixel);
     imageStore(image, pixel, vec4(result, 1.0));
 }

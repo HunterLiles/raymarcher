@@ -184,7 +184,7 @@ static bool frame_acquire(Vulkan &v, Frame &f, uint32_t &image) {
     return true;
 }
 
-static void record_compute(Vulkan &v, Frame &f, float time) {
+static void record_compute(Vulkan &v, Frame &f, float time, const Camera &camera) {
     auto cmd = f.commands.buffer;
     auto &output = f.output;
 
@@ -200,7 +200,10 @@ static void record_compute(Vulkan &v, Frame &f, float time) {
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, v.pipeline.layout, 0, 1,
                             &f.descriptor, 0, nullptr);
 
-    FrameData data{320.0f, 180.0f, time};
+    FrameData data{camera.orientation,
+                   {camera.pos.x, camera.pos.y, camera.pos.z, 0.0f},
+                   {float(v.swapchain.extent.width), float(v.swapchain.extent.height)},
+                   time};
     vkCmdPushConstants(cmd, v.pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(data), &data);
     vkCmdDispatch(cmd, 40, 23, 1);
 
@@ -236,7 +239,7 @@ static void record_blit(Vulkan &v, Frame &f, uint32_t image) {
                   VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 }
 
-static void frame_record(Vulkan &v, Frame &f, uint32_t image, float time) {
+static void frame_record(Vulkan &v, Frame &f, uint32_t image, float time, const Camera &camera) {
     auto cmd = f.commands.buffer;
     commands_begin(cmd);
     if (f.timestamps.pool) {
@@ -244,7 +247,7 @@ static void frame_record(Vulkan &v, Frame &f, uint32_t image, float time) {
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, f.timestamps.pool, 0);
     }
 
-    record_compute(v, f, time);
+    record_compute(v, f, time, camera);
     record_blit(v, f, image);
 
     if (f.timestamps.pool)
@@ -289,7 +292,7 @@ static void frame_present(Vulkan &v, uint32_t image) {
         VK_CHECK(result);
 }
 
-bool vulkan_draw(Vulkan &v, uint32_t w, uint32_t h, float time) {
+bool vulkan_draw(Vulkan &v, uint32_t w, uint32_t h, float time, const Camera &camera) {
     if (!w || !h)
         return false;
 
@@ -302,7 +305,7 @@ bool vulkan_draw(Vulkan &v, uint32_t w, uint32_t h, float time) {
         return false;
 
     auto start = Clock::now();
-    frame_record(v, f, image, time);
+    frame_record(v, f, image, time, camera);
     frame_submit(v, f, image);
     v.stats.cpu_work_ms = elapsed(start);
     frame_present(v, image);

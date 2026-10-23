@@ -1,3 +1,5 @@
+// I want to take controller out of here
+#include "controller.hpp"
 #include "vulkan/vulkan.hpp"
 #include <GLFW/glfw3.h>
 #include <algorithm>
@@ -17,6 +19,9 @@ int main() {
             glfwTerminate();
     };
 
+    Camera camera{};
+    Controller controller{};
+
     try {
         glfwSetErrorCallback([](int code, const char *message) {
             std::fprintf(stderr, "GLFW %d: %s\n", code, message);
@@ -34,6 +39,8 @@ int main() {
         window = glfwCreateWindow(1280, 720, "Raymarcher", nullptr, nullptr);
         if (!window)
             throw std::runtime_error("Window creation failed");
+
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
         uint32_t extension_count = 0;
         const char **extensions = glfwGetRequiredInstanceExtensions(&extension_count);
@@ -71,8 +78,11 @@ int main() {
                 continue;
             }
 
-            elapsed_seconds += float(frame_ms * .001);
-            vulkan_draw(*renderer, uint32_t(width), uint32_t(height), elapsed_seconds);
+            float dt = float(frame_ms * 0.001);
+            controller.camera_rotate(camera, window);
+            controller.camera_move(camera, dt, window);
+            elapsed_seconds += dt;
+            vulkan_draw(*renderer, uint32_t(width), uint32_t(height), elapsed_seconds, camera);
         }
 
         auto stats = vulkan_stats(*renderer);

@@ -1,14 +1,22 @@
 #pragma once
 
+#include "../engine_math.hpp"
 #include "devices.hpp"
+#include <cstddef>
 #include <filesystem>
 
-// Matches the fragment shader's push-constant block.
-struct FrameData {
-    float width, height, time;
+struct alignas(16) FrameData {
+    quaternion camera_rot;
+    vec4 camera_pos;
+    vec2 resolution;
+    float time;
 };
 
-static_assert(sizeof(FrameData) == 12);
+static_assert(offsetof(FrameData, camera_rot) == 0);
+static_assert(offsetof(FrameData, camera_pos) == 16);
+static_assert(offsetof(FrameData, resolution) == 32);
+static_assert(offsetof(FrameData, time) == 40);
+static_assert(sizeof(FrameData) == 48);
 
 struct Pipeline {
     VkPipeline handle{};
