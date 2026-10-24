@@ -13,7 +13,6 @@
 #include <chrono>
 #include <utility>
 
-using engine::Camera;
 using engine::FrameStats;
 
 using Clock = std::chrono::steady_clock;
@@ -27,7 +26,7 @@ struct Frame {
     FrameSync sync;
     Timestamps timestamps;
 
-    RenderImage output;
+    RenderImage output, shadow;
     VkDescriptorSet descriptor{};
 };
 
@@ -45,9 +44,8 @@ struct Vulkan {
     uint32_t requested_width{}, requested_height{};
     bool recreate{};
 
-    uint32_t pixel_size{};
+    uint32_t pixel_size{}, shadow_pixel, size{};
     FrameStats stats;
-    float frame_ms{};
 };
 
 static void cache_descriptors_update(Vulkan &v) {
@@ -72,13 +70,14 @@ static void descriptors_build(Vulkan &v, const Pipeline &pipeline, VkBuffer buff
     uint32_t count = uint32_t(v.frames.size());
 
     VkDescriptorPoolSize sizes[] = {
-        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, count},
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, count * 2},
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, count},
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, count},
     };
 
     VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     pool.maxSets = count;
-    pool.poolSizeCount = 2;
+    pool.poolSizeCount = 3;
     pool.pPoolSizes = sizes;
 
     VK_CHECK(vkCreateDescriptorPool(device, &pool, nullptr, &handle));
@@ -95,8 +94,14 @@ static void descriptors_build(Vulkan &v, const Pipeline &pipeline, VkBuffer buff
         image.imageView = v.frames[i].output.view;
         image.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
+        VkDescriptorImageInfo shadow{};
+        shadow.imageView = v.frames[i].shadow.view;
+        shadow.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
         VkDescriptorBufferInfo storage{buffer, 0, capacity};
-        VkWriteDescriptorSet writes[2]{};
+        VkDescriptorBufferInfo uniforms{pipeline.uniforms.buffers[i].handle, 0,
+                                        pipeline.uniforms.data.size()};
+        VkWriteDescriptorSet writes[4]{};
 
         for (auto &write : writes) {
             write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -112,7 +117,15 @@ static void descriptors_build(Vulkan &v, const Pipeline &pipeline, VkBuffer buff
         writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[1].pBufferInfo = &storage;
 
-        vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
+        writes[2].dstBinding = 2;
+        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[2].pBufferInfo = &uniforms;
+
+        writes[3].dstBinding = 3;
+        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[3].pImageInfo = &shadow;
+
+        vkUpdateDescriptorSets(device, 4, writes, 0, nullptr);
     }
 }
 
@@ -130,9 +143,10 @@ static void frame_create(const Device &d, Frame &f) {
     timestamps_create(d, f.timestamps);
 }
 
-// The caller waits for the device before destroying frame resources.
+// The caller waits for the device before destroying frame.
 static void frame_destroy(const Device &d, Frame &f) {
     image_destroy(d, f.output);
+    image_destroy(d, f.shadow);
     timestamps_destroy(d, f.timestamps);
     sync_destroy(d, f.sync);
     commands_destroy(d, f.commands);
@@ -172,7 +186,10 @@ static void rebuild(Vulkan &v, uint32_t w, uint32_t h) {
 
     for (auto &f : v.frames) {
         image_destroy(d, f.output);
+        image_destroy(d, f.shadow);
+
         image_create(d, f.output, extent);
+        image_create(d, f.shadow, render_extent(extent.width, extent.height, v.shadow_pixel));
     }
 
     descriptors_create(v);
@@ -184,9 +201,10 @@ static void rebuild(Vulkan &v, uint32_t w, uint32_t h) {
 
 void vulkan_initialize(Vulkan &v, VkSurfaceKHR surface, uint32_t w, uint32_t h,
                        const std::filesystem::path &shader, uint32_t pixel_size,
-                       const ShaderBuild *build) {
+                       uint32_t shadow_pixel_size, const ShaderBuild *build) {
     v.surface = surface;
     v.pixel_size = pixel_size;
+    v.shadow_pixel = shadow_pixel_size;
 
     device_create(v.device, v.instance.handle, surface);
     pipeline_create(v.device, v.pipeline, shader);
@@ -253,7 +271,7 @@ static bool frame_acquire(Vulkan &v, Frame &f, uint32_t &image) {
     return true;
 }
 
-static void record_compute(Vulkan &v, Frame &f, float time, const Camera &camera) {
+static void record_compute(Vulkan &v, Frame &f, float time) {
     auto cmd = f.commands.buffer;
     auto &output = f.output;
 
@@ -265,19 +283,35 @@ static void record_compute(Vulkan &v, Frame &f, float time, const Camera &camera
         output.initialized ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
+    auto &shadow = f.shadow;
+    image_barrier(cmd, shadow.handle, VK_IMAGE_ASPECT_COLOR_BIT,
+                  shadow.initialized ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_IMAGE_LAYOUT_GENERAL, shadow.initialized ? VK_ACCESS_SHADER_READ_BIT : 0,
+                  VK_ACCESS_SHADER_WRITE_BIT,
+                  shadow.initialized ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                                     : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+
     caches_record(v.device, v.caches, cmd, v.pipeline.layout, f.descriptor, time);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, v.pipeline.handle);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, v.pipeline.layout, 0, 1,
                             &f.descriptor, 0, nullptr);
 
-    FrameData data{camera.orientation,
-                   {camera.pos.x, camera.pos.y, camera.pos.z, 0.0f},
-                   {float(v.swapchain.extent.width), float(v.swapchain.extent.height)},
-                   time,
-                   {v.frame_ms > 0.0f ? 1000.0f / v.frame_ms : 0.0f, v.frame_ms,
-                    float(v.stats.cpu_work_ms),
-                    v.stats.gpu_available ? float(v.stats.gpu_ms) : -1.0f}};
+    FrameData data{};
+    data.resolution = {float(v.swapchain.extent.width), float(v.swapchain.extent.height)};
+    data.time = time;
+
+    data.pass = 1;
+    vkCmdPushConstants(cmd, v.pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(data), &data);
+    vkCmdDispatch(cmd, (shadow.extent.width + 7) / 8, (shadow.extent.height + 7) / 8, 1);
+
+    image_barrier(cmd, shadow.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL,
+                  VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+
+    data.pass = 0;
+
     vkCmdPushConstants(cmd, v.pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(data), &data);
     vkCmdDispatch(cmd, (output.extent.width + 7) / 8, (output.extent.height + 7) / 8, 1);
 
@@ -313,7 +347,7 @@ static void record_blit(Vulkan &v, Frame &f, uint32_t image) {
                   VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 }
 
-static void frame_record(Vulkan &v, Frame &f, uint32_t image, float time, const Camera &camera) {
+static void frame_record(Vulkan &v, Frame &f, uint32_t image, float time) {
     auto cmd = f.commands.buffer;
     commands_begin(cmd);
     if (f.timestamps.pool) {
@@ -321,7 +355,7 @@ static void frame_record(Vulkan &v, Frame &f, uint32_t image, float time, const 
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, f.timestamps.pool, 0);
     }
 
-    record_compute(v, f, time, camera);
+    record_compute(v, f, time);
     record_blit(v, f, image);
 
     if (f.timestamps.pool)
@@ -347,6 +381,7 @@ static void frame_submit(Vulkan &v, Frame &f, uint32_t image) {
     VK_CHECK(vkQueueSubmit(v.device.queues.graphics, 1, &submit, f.sync.complete));
 
     f.output.initialized = true;
+    f.shadow.initialized = true;
     f.timestamps.submitted = true;
 }
 
@@ -366,10 +401,7 @@ static void frame_present(Vulkan &v, uint32_t image) {
         VK_CHECK(result);
 }
 
-bool vulkan_draw(Vulkan &v, uint32_t w, uint32_t h, float time, const Camera &camera,
-                 float frame_ms) {
-    v.frame_ms = frame_ms;
-
+bool vulkan_draw(Vulkan &v, uint32_t w, uint32_t h, float time) {
     if (!w || !h)
         return false;
 
@@ -384,8 +416,10 @@ bool vulkan_draw(Vulkan &v, uint32_t w, uint32_t h, float time, const Camera &ca
     if (!frame_acquire(v, f, image))
         return false;
 
+    uniforms_upload(v.pipeline.uniforms, v.slot);
+
     auto start = Clock::now();
-    frame_record(v, f, image, time, camera);
+    frame_record(v, f, image, time);
     frame_submit(v, f, image);
     v.stats.cpu_work_ms = elapsed(start);
     frame_present(v, image);
@@ -394,6 +428,10 @@ bool vulkan_draw(Vulkan &v, uint32_t w, uint32_t h, float time, const Camera &ca
     v.slot = (v.slot + 1) % uint32_t(v.frames.size());
 
     return true;
+}
+
+void vulkan_set_uniform(Vulkan &v, std::string_view name, const void *value, UniformKind kind) {
+    uniforms_set(v.pipeline.uniforms, name, value, kind);
 }
 
 FrameStats vulkan_stats(const Vulkan &v) {
@@ -429,6 +467,7 @@ void vulkan_reload(Vulkan &v, const ShaderBuild &build) {
 
     try {
         pipeline_create(d, next_pipeline, build.render);
+        uniforms_copy(next_pipeline.uniforms, v.pipeline.uniforms);
 
         for (const auto &cache : build.caches)
             cache_add(d, next_caches, next_pipeline.layout, cache.id, build.cache, cache.count,

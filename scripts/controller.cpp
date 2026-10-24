@@ -1,6 +1,5 @@
 #include "controller.hpp"
 #include <GLFW/glfw3.h>
-#include <engine/engine_math.hpp>
 
 using namespace engine;
 
@@ -29,8 +28,14 @@ void Controller::camera_move(Camera &camera, float dt, GLFWwindow *window) {
 
     float dist = speed * dt;
 
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
         dist *= sprint;
+        player.stamina.x -= 20.0f * dt;
+    } else {
+        player.stamina.x += 10.0f * dt;
+    }
+
+    player.stamina.x = std::clamp(player.stamina.x, 0.0f, player.stamina.y);
 
     // rotate() keeps the movement relative to the camera
     camera.pos += move * dist;

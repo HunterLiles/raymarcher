@@ -38,7 +38,19 @@ FetchContent_Declare(
   glfw URL https://github.com/glfw/glfw/archive/refs/tags/3.4.tar.gz
            DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 
-FetchContent_MakeAvailable(glfw)
+set(SPIRV_REFLECT_EXECUTABLE
+    OFF
+    CACHE BOOL "" FORCE)
+set(SPIRV_REFLECT_STATIC_LIB
+    ON
+    CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  spirv_reflect
+  URL https://github.com/KhronosGroup/SPIRV-Reflect/archive/refs/tags/vulkan-sdk-1.3.296.0.tar.gz
+      DOWNLOAD_EXTRACT_TIMESTAMP
+      TRUE)
+
+FetchContent_MakeAvailable(glfw spirv_reflect)
 
 # Shaders
 set(shader_dir "${CMAKE_CURRENT_BINARY_DIR}/shaders")
@@ -79,6 +91,7 @@ add_library(
   engine/engine.cpp
   engine/hot_reload.cpp
   engine/vulkan/caches.cpp
+  engine/vulkan/uniform.cpp
   engine/vulkan/vulkan.cpp
   engine/vulkan/instance.cpp
   engine/vulkan/devices.cpp
@@ -96,7 +109,7 @@ target_compile_features(engine PUBLIC cxx_std_20)
 target_link_libraries(
   engine
   PUBLIC glfw
-  PRIVATE Vulkan::Vulkan)
+  PRIVATE Vulkan::Vulkan spirv-reflect-static)
 target_compile_definitions(engine PUBLIC GLFW_INCLUDE_NONE)
 
 target_compile_options(engine PRIVATE -Wall -Wextra -Wpedantic

@@ -4,19 +4,18 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <string_view>
 
 struct GLFWwindow;
 
 namespace engine {
-struct Camera {
-    vec3 pos{0.0f, 2.0f, -5.0f};
-    quaternion orientation{};
-};
-
 struct FrameStats {
     double cpu_work_ms{}, gpu_ms{};
+
     bool gpu_available{};
+
     uint64_t submitted_frames{};
+
     const char *device_name{};
 };
 
@@ -32,14 +31,20 @@ struct CacheStats {
 
 struct EngineConfig {
     int width{1280}, height{720};
+
     const char *title{"Vulkan Engine"};
+
     uint32_t pixel_size{2};
-    std::filesystem::path shader;
+    uint32_t shadow_pixel_size{2};
+
+    uint64_t cache_budget{1ull * 1024 * 1024 * 1024};
+
     bool validation{true};
+    bool hot_reload{true};
+
+    std::filesystem::path shader;
     std::filesystem::path sdf;
     std::filesystem::path compiler{"glslc"};
-    bool hot_reload{true};
-    uint64_t cache_budget{1ull * 1024 * 1024 * 1024};
 };
 
 class Engine {
@@ -52,9 +57,17 @@ class Engine {
     ~Engine();
 
     bool is_running();
-    bool draw(const Camera &);
+    bool draw();
     bool reload_shaders();
+
     void toggle_fullscreen();
+    void set_uniform(std::string_view, float);
+    void set_uniform(std::string_view, int32_t);
+    void set_uniform(std::string_view, uint32_t);
+    void set_uniform(std::string_view, vec2);
+    void set_uniform(std::string_view, vec3);
+    void set_uniform(std::string_view, vec4);
+    void set_uniform(std::string_view, quaternion);
 
     float dt() const;
     float time() const;

@@ -41,13 +41,13 @@ void main() {
 
 #include "hud.glsl"
 #include "lighting.glsl"
-#include "skybox.glsl"
 
-vec3 raymarch(in vec3 ray_origin, in vec3 ray_dir) {
+float raymarch(in vec3 ray_origin, in vec3 ray_dir, out int material) {
     float total_dist = 0.0f;
     const int MAX_STEPS = 512;
     const float MIN_HIT = 0.01f;
     const float MAX_DIST = 1000.0f;
+    material = -1;
 
     for (int i = 0; i < MAX_STEPS; ++i) {
         vec3 curr_pos = ray_origin + total_dist * ray_dir;
@@ -55,18 +55,8 @@ vec3 raymarch(in vec3 ray_origin, in vec3 ray_dir) {
         Surface surface = map(curr_pos);
 
         if (surface.distance < MIN_HIT) {
-            Material material = get_material(curr_pos, surface.material);
-
-            float field_scale;
-            vec3 normal = tangentNormal(curr_pos, surface.material, field_scale);
-
-            vec3 emitter_pos = vec3(0.0, 1.0, 0.0);
-            Material emitter = get_material(emitter_pos, 1);
-
-            float fog = 1.0 / (1.0 + total_dist / 10.0);
-
-            return color(curr_pos, normal, material, field_scale, emitter_pos, emitter.emission) *
-                   fog;
+            material = surface.material;
+            return total_dist;
         }
 
         if (total_dist > MAX_DIST) {
@@ -76,12 +66,12 @@ vec3 raymarch(in vec3 ray_origin, in vec3 ray_dir) {
         total_dist += surface.distance;
     }
 
-    return sky(ray_dir);
+    return -1.0;
 }
 
 void main() {
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 size = imageSize(image);
+    ivec2 size = frame.pass == 1u ? imageSize(shadow_image) : imageSize(image);
 
     if (any(greaterThanEqual(pixel, size)))
         return;
@@ -90,19 +80,25 @@ void main() {
     uv.x *= frame.resolution.x / frame.resolution.y;
     uv.y = -uv.y;
 
-    vec3 ray_origin = frame.camera_pos.xyz;
-    vec3 ray_dir = camera_dir(uv, frame.camera_rot);
+    vec3 ray_origin = game.camera_pos.xyz;
+    vec3 ray_dir = camera_dir(uv, game.camera_rot);
 
-    vec3 result = raymarch(ray_origin, ray_dir);
+    int material;
+    float dist = raymarch(ray_origin, ray_dir, material);
+    bool hit = dist >= 0.0;
+    vec3 p = ray_origin + dist * ray_dir;
+
+    if (frame.pass == 1u) {
+        vec3 result = hit ? vec3(surface_shadow(p), 0.0) : vec3(1.0);
+        imageStore(shadow_image, pixel, vec4(result, 1.0));
+        return;
+    }
+
+    vec3 result = hit ? color(p, material, dist, pixel) : sky(ray_dir);
+
     result = psx_color(result, pixel);
     result = draw_hud(result, pixel);
     result = draw_debug_hud(result, pixel);
-
-    ivec2 offset = abs(pixel - size / 2);
-    bool crosshair = (offset.x <= 3 && offset.y == 0) || (offset.y <= 3 && offset.x == 0);
-
-    if (crosshair)
-        result = vec3(0.9);
 
     imageStore(image, pixel, vec4(result, 1.0));
 }

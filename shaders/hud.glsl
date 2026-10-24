@@ -1,3 +1,5 @@
+#include "common.glsl"
+
 uint hud_glyph(uint character) {
     switch (character) {
     case 48u:
@@ -90,7 +92,7 @@ vec3 draw_debug_hud(vec3 background, ivec2 pixel) {
     if (column < 5)
         character = labels[row * 5 + column];
     else if (column >= 6 && column <= 12)
-        character = hud_number(frame.metrics[row], column - 6);
+        character = hud_number(game.metrics[row], column - 6);
     else if (row > 0 && column == 14)
         character = 77u;
     else if (row > 0 && column == 15)
@@ -110,6 +112,7 @@ vec3 draw_debug_hud(vec3 background, ivec2 pixel) {
 
 // Game HUD
 vec3 hud_bar(vec3 background, ivec2 p, ivec2 size, float amount, vec3 fill) {
+
     if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, size)))
         return background;
 
@@ -136,16 +139,19 @@ vec3 draw_hud(vec3 background, ivec2 pixel) {
     ivec2 screen = imageSize(image);
     ivec2 origin = ivec2(8, screen.y - 31);
 
-    const float health = 0.75;
-    const float magic = 0.55;
-    const float stamina = 0.90;
+    ivec2 offset = abs(pixel - screen / 2);
+    bool crosshair = (offset.x <= 3 && offset.y == 0) || (offset.y <= 3 && offset.x == 0);
 
-    background = hud_bar(background, pixel - origin, ivec2(88, 7), health, vec3(0.65, 0.16, 0.12));
+    if (crosshair)
+        background = vec3(0.9);
 
-    background = hud_bar(background, pixel - origin - ivec2(0, 9), ivec2(72, 7), magic,
+    background =
+        hud_bar(background, pixel - origin, ivec2(88, 7), game.health, vec3(0.65, 0.16, 0.12));
+
+    background = hud_bar(background, pixel - origin - ivec2(0, 9), ivec2(72, 7), game.mana,
                          vec3(0.20, 0.35, 0.65));
 
-    background = hud_bar(background, pixel - origin - ivec2(0, 18), ivec2(56, 5), stamina,
+    background = hud_bar(background, pixel - origin - ivec2(0, 18), ivec2(56, 5), game.stamina,
                          vec3(0.42, 0.52, 0.28));
 
     return background;

@@ -1,6 +1,45 @@
 #include "common.glsl"
 #include "psrdnoise2.glsl"
 
+float daylight_amount(vec3 sun_direction) {
+    return smoothstep(-0.15, 0.15, sun_direction.y);
+}
+
+vec3 sun_direction() {
+    const float day_length = 120.0;
+    float angle = frame.time * 6.2831 / day_length;
+
+    return normalize(vec3(cos(angle), sin(angle), 0.3));
+}
+
+vec3 sky_light_direction() {
+    vec3 sun = sun_direction();
+    return sun.y >= 0.0 ? sun : -sun;
+}
+
+vec3 sky_light(vec3 normal, float occlusion, float visibility) {
+    vec3 sun = sun_direction();
+
+    bool isDay = sun.y >= 0.0;
+    float day_light = daylight_amount(sun);
+    float strength = smoothstep(0.0, 0.15, abs(sun.y));
+
+    vec3 light_dir = isDay ? sun : -sun;
+    float diffuse = max(dot(normal, light_dir), 0.0);
+
+    vec3 dir_color =
+        isDay ? mix(vec3(1.0, 0.35, 0.12), vec3(1.0, 0.95, 0.85), smoothstep(0.0, 0.4, sun.y))
+              : vec3(0.08, 0.12, 0.22) * 5.0;
+
+    vec3 sky_ambient = mix(vec3(0.06, 0.08, 0.12), vec3(0.18, 0.2, 0.25), day_light);
+    vec3 ground_ambient = sky_ambient * vec3(0.45, 0.35, 0.25);
+
+    vec3 ambient = mix(ground_ambient, sky_ambient, normal.y * 0.5 + 0.5);
+    ambient *= occlusion;
+
+    return ambient + dir_color * diffuse * strength * visibility;
+}
+
 float stars(vec3 direction) {
     const float pi = 3.14159265;
 

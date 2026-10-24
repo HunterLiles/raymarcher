@@ -1,3 +1,5 @@
+#include "skybox.glsl"
+
 // PBR
 struct Material {
     vec3 albedo;
@@ -23,23 +25,14 @@ Material get_material(vec3 p, int material) {
 }
 
 // Normal of the object for lighting using gradients
-vec3 tangentNormal(vec3 p, int material, out float field_scale) {
-    vec3 gradient;
+vec3 tangentNormal(vec3 p, out float field_scale) {
+    // Defining its nabla f (∇f) or gradient
+    float e = 0.005;
 
-    if (material == 0) {
-        vec2 slope;
-        terrain_height(p.xz, slope);
-        gradient = vec3(-slope.x, 1.0, -slope.y) * terrain_distance_scale;
-    } else {
-
-        // Defining its nabla f (∇f) or gradient
-        float e = 0.005;
-
-        gradient = vec3(map(p + vec3(e, 0, 0)).distance - map(p - vec3(e, 0, 0)).distance,
-                        map(p + vec3(0, e, 0)).distance - map(p - vec3(0, e, 0)).distance,
-                        map(p + vec3(0, 0, e)).distance - map(p - vec3(0, 0, e)).distance) /
-                   (2.0 * e);
-    }
+    vec3 gradient = vec3(map(p + vec3(e, 0, 0)).distance - map(p - vec3(e, 0, 0)).distance,
+                         map(p + vec3(0, e, 0)).distance - map(p - vec3(0, e, 0)).distance,
+                         map(p + vec3(0, 0, e)).distance - map(p - vec3(0, 0, e)).distance) /
+                    (2.0 * e);
 
     field_scale = max(length(gradient), 0.000001);
     return gradient / field_scale;
@@ -47,7 +40,7 @@ vec3 tangentNormal(vec3 p, int material, out float field_scale) {
 
 float AO(vec3 p, vec3 normal, float field_scale) {
     float occlusion = 0.0;
-    float weight = 1.0;
+    float weight = 10.0;
     float height = 0.1;
 
     for (int i = 0; i < 3; ++i) {
@@ -99,37 +92,40 @@ vec3 point_light(vec3 p, vec3 normal, vec3 pos, vec3 emission, float power) {
     return emission * diffuse * attenuation;
 }
 
-vec3 color(vec3 obj, vec3 normal, Material material, float field_scale, vec3 emitter_pos,
-           vec3 emitter_emission) {
-    vec3 sun = sun_direction();
-
-    bool isDay = sun.y >= 0.0;
-    float day_light = daylight_amount(sun);
-    float strength = smoothstep(0.0, 0.15, abs(sun.y));
-
-    vec3 light_dir = isDay ? sun : -sun;
-    float diffuse = max(dot(normal, light_dir), 0.0);
-
-    vec3 dir_color =
-        isDay ? mix(vec3(1.0, 0.35, 0.12), vec3(1.0, 0.95, 0.85), smoothstep(0.0, 0.4, sun.y))
-              : vec3(0.08, 0.12, 0.22) * 5.0;
-
-    vec3 sky_light = mix(vec3(0.06, 0.08, 0.12), vec3(0.18, 0.2, 0.25), day_light);
-    vec3 ground_light = sky_light * vec3(0.45, 0.35, 0.25);
-
-    vec3 ambient = mix(ground_light, sky_light, normal.y * 0.5 + 0.5);
-    ambient *= AO(obj, normal, field_scale);
+vec2 surface_shadow(vec3 p) {
+    float field_scale;
+    vec3 normal = tangentNormal(p, field_scale);
+    vec3 light_dir = sky_light_direction();
 
     float visibility = 1.0;
+    if (dot(normal, light_dir) <= 0.0 || light_dir.y <= 0.0)
+        visibility = shadow(p + normal * 0.02, light_dir);
 
-    if (diffuse > 0.0 && strength > 0.0) {
-        visibility = shadow(obj + normal * 0.02, light_dir);
-    }
+    return vec2(visibility, AO(p, normal, field_scale));
+}
 
-    vec3 light = ambient + dir_color * diffuse * strength * visibility;
-    light += point_light(obj, normal, emitter_pos, emitter_emission, 4.0);
+vec2 shadow_visibility(ivec2 pixel) {
+    ivec2 size = imageSize(image);
+    ivec2 shadow_size = imageSize(shadow_image);
+    ivec2 p = min(ivec2((vec2(pixel) + 0.5) * vec2(shadow_size) / vec2(size)), shadow_size - 1);
 
-    return material.albedo * light + material.emission;
+    return imageLoad(shadow_image, p).rg;
+}
+
+vec3 color(vec3 obj, int material_id, float dist, ivec2 pixel) {
+    float field_scale;
+    vec3 normal = tangentNormal(obj, field_scale);
+    Material material = get_material(obj, material_id);
+
+    vec2 visbility = shadow_visibility(pixel);
+    vec3 light = sky_light(normal, visbility.y, visbility.x);
+
+    vec3 emitter_pos = vec3(0.0, 1.0, 0.0);
+    Material emitter = get_material(emitter_pos, 1);
+    light += point_light(obj, normal, emitter_pos, emitter.emission, 4.0);
+
+    float fog = 1.0 / (1.0 + dist / 10.0);
+    return (material.albedo * light + material.emission) * fog;
 }
 
 // PSX dithering

@@ -2,6 +2,7 @@
 
 #include "../engine.hpp"
 #include "common.hpp"
+#include "uniform.hpp"
 #include <filesystem>
 #include <span>
 
@@ -14,14 +15,15 @@ VkInstance vulkan_instance(const Vulkan &);
 
 void vulkan_initialize(Vulkan &, VkSurfaceKHR, uint32_t width, uint32_t height,
                        const std::filesystem::path &shader, uint32_t pixel_size,
-                       const ShaderBuild *build = nullptr);
+                       uint32_t shadow_pixel_size, const ShaderBuild *build = nullptr);
 
 void vulkan_reload(Vulkan &, const ShaderBuild &);
 
 void vulkan_destroy(Vulkan *);
 
-bool vulkan_draw(Vulkan &, uint32_t width, uint32_t height, float time, const engine::Camera &,
-                 float frame_ms);
+bool vulkan_draw(Vulkan &, uint32_t width, uint32_t height, float time);
+
+void vulkan_set_uniform(Vulkan &, std::string_view, const void *, UniformKind);
 
 engine::FrameStats vulkan_stats(const Vulkan &);
 

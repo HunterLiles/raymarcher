@@ -38,7 +38,7 @@ struct Engine::State {
 Engine::Engine(const EngineConfig &config) : state(std::make_unique<State>()) {
     auto &s = *state;
 
-    if (!config.pixel_size)
+    if (!config.pixel_size || !config.shadow_pixel_size)
         throw std::invalid_argument("Pixel size must be greater than zero");
 
     if (config.shader.empty())
@@ -101,7 +101,7 @@ Engine::Engine(const EngineConfig &config) : state(std::make_unique<State>()) {
 
     vulkan_initialize(*s.renderer, surface, uint32_t(std::max(s.width, 1)),
                       uint32_t(std::max(s.height, 1)), binary, config.pixel_size,
-                      s.shaders.enabled() ? &build : nullptr);
+                      config.shadow_pixel_size, s.shaders.enabled() ? &build : nullptr);
 
     s.previous = Clock::now();
 }
@@ -141,12 +141,25 @@ bool Engine::is_running() {
     }
 }
 
-bool Engine::draw(const Camera &camera) {
+bool Engine::draw() {
     auto &s = *state;
 
-    return vulkan_draw(*s.renderer, uint32_t(s.width), uint32_t(s.height), s.time, camera,
-                       s.frame_ms);
+    return vulkan_draw(*s.renderer, uint32_t(s.width), uint32_t(s.height), s.time);
 }
+
+#define UNIFORM_SETTER(type, kind)                                                                 \
+    void Engine::set_uniform(std::string_view name, type value) {                                  \
+        vulkan_set_uniform(*state->renderer, name, &value, UniformKind::kind);                     \
+    }
+
+UNIFORM_SETTER(float, Float);
+UNIFORM_SETTER(int32_t, Int);
+UNIFORM_SETTER(uint32_t, Uint);
+UNIFORM_SETTER(vec2, Vec2);
+UNIFORM_SETTER(vec3, Vec3);
+UNIFORM_SETTER(vec4, Vec4);
+UNIFORM_SETTER(quaternion, Vec4);
+#undef UNIFORM_SETTER
 
 float Engine::dt() const {
     return state->dt;

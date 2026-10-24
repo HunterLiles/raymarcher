@@ -3,6 +3,7 @@
 #include "../engine_math.hpp"
 #include "devices.hpp"
 #include "gpu_layout.hpp"
+#include "uniform.hpp"
 #include <cstddef>
 #include <filesystem>
 
@@ -19,9 +20,13 @@ static_assert(gpu_layout_matches<FrameData>(std::array{
 #undef GPU_FIELD
 }));
 
-using CacheDispatch = FrameData;
+struct CacheDispatch {
+    float time{};
+    uint32_t offset{}, count{}, id{};
+};
 
 struct Pipeline {
+    Uniforms uniforms;
     VkPipeline handle{};
     VkPipelineLayout layout{};
     VkDescriptorSetLayout descriptor_layout{};

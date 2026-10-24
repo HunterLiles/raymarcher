@@ -2,7 +2,7 @@
 #include <fstream>
 #include <vector>
 
-VkShaderModule shader_load(VkDevice device, const std::filesystem::path &path) {
+std::vector<uint32_t> shader_read(const std::filesystem::path &path) {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file)
         throw std::runtime_error("Cannot open shader: " + path.string());
@@ -19,8 +19,13 @@ VkShaderModule shader_load(VkDevice device, const std::filesystem::path &path) {
     if (code[0] != 0x07230203)
         throw std::runtime_error("Invalid SPIR-V header");
 
+    return code;
+}
+
+VkShaderModule shader_load(VkDevice device, const std::filesystem::path &path) {
+    const auto code = shader_read(path);
     VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-    ci.codeSize = size_t(bytes);
+    ci.codeSize = code.size() * sizeof(uint32_t);
     ci.pCode = code.data();
 
     VkShaderModule module{};

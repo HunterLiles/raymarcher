@@ -1,5 +1,6 @@
 #pragma once
 
+#include "player.hpp"
 #include <engine/engine.hpp>
 
 struct GLFWwindow;
@@ -15,6 +16,8 @@ class Controller {
     float gravity{9.81f}, jump{5.0f};
     float height{1.7f};
 
-    void camera_move(engine::Camera &, float dt, GLFWwindow *);
-    void camera_rotate(engine::Camera &, GLFWwindow *);
+    Player player{};
+
+    void camera_move(Camera &, float dt, GLFWwindow *);
+    void camera_rotate(Camera &, GLFWwindow *);
 };

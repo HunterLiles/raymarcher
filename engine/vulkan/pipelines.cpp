@@ -30,14 +30,18 @@ VkPipeline compute_pipeline_create(const Device &d, VkPipelineLayout layout,
 
 void pipeline_create(const Device &d, Pipeline &p, const std::filesystem::path &path) {
     try {
+        uniforms_create(d, p.uniforms, path);
+
         VkDescriptorSetLayoutBinding bindings[] = {
             {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
             {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+            {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+            {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
         };
 
         VkDescriptorSetLayoutCreateInfo descriptors{
             VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-        descriptors.bindingCount = 2;
+        descriptors.bindingCount = 4;
         descriptors.pBindings = bindings;
 
         VK_CHECK(
@@ -74,5 +78,6 @@ void pipeline_destroy(const Device &d, Pipeline &p) {
     if (p.descriptor_layout)
         vkDestroyDescriptorSetLayout(d.handle, p.descriptor_layout, nullptr);
 
+    uniforms_destroy(d, p.uniforms);
     p = {};
 }
